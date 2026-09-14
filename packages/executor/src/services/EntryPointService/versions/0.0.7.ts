@@ -156,8 +156,8 @@ export class EntryPointV7Service implements IEntryPointService {
             gasLimit: gasLimit !== undefined ? toHex(gasLimit) : undefined,
           },
           "latest",
-          stateOverride as any,
-        ],
+          ...(stateOverride ? [stateOverride] : []),
+        ] as any,
       });
 
       const decodedResult = decodeFunctionResult({
@@ -259,8 +259,8 @@ export class EntryPointV7Service implements IEntryPointService {
             gasLimit: gasLimit !== undefined ? toHex(gasLimit) : undefined,
           },
           "latest",
-          stateOverride as any,
-        ],
+          ...(stateOverride ? [stateOverride] : []),
+        ] as any,
       });
 
       const decodedResult = decodeFunctionResult({
@@ -474,8 +474,8 @@ export class EntryPointV7Service implements IEntryPointService {
             gasLimit: gasLimit !== undefined ? toHex(gasLimit) : undefined,
           },
           "latest",
-          stateOverride,
-        ],
+          ...(stateOverride ? [stateOverride] : []),
+        ] as any,
       });
 
       const res = decodeFunctionResult({
@@ -503,7 +503,11 @@ export class EntryPointV7Service implements IEntryPointService {
     try {
       const errorResult = await this.publicClient.request({
         method: "eth_call",
-        params: [{ to: this.address, data }, "latest", stateOverride],
+        params: [
+          { to: this.address, data },
+          "latest",
+          ...(stateOverride ? [stateOverride] : []),
+        ] as any,
       });
       return this.parseValidationResult(userOp, errorResult);
     } catch (error: any) {
