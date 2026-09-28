@@ -102,11 +102,19 @@ export class Eth {
 
   /**
    * simulateHandleOp call used to size the userop's state diff (Citrea L1 fee).
-   * Mirrors the estimation simulation (gas price of 1, so prefund never fails).
+   * Uses the gas limits the userop will be sent with: the 10M estimation
+   * placeholders don't fit in Citrea's 10M block gas limit and revert with AA95.
+   * Gas price of 1, so the prefund never fails.
    */
   private buildL1DiffSizeCall(
     entryPoint: string,
     userOp: UserOperation,
+    gasLimits: {
+      callGasLimit: BigNumberish;
+      verificationGasLimit: BigNumberish;
+      paymasterVerificationGasLimit: BigNumberish;
+      paymasterPostOpGasLimit: BigNumberish;
+    },
     stateOverrides?: StateOverrides,
   ): {
     to: string;
@@ -117,7 +125,17 @@ export class Eth {
     const [data, entryPointOverride] =
       this.entryPointService.encodeSimulateHandleOp(
         entryPoint,
-        { ...userOp, maxFeePerGas: BigInt(1), maxPriorityFeePerGas: BigInt(1) },
+        {
+          ...userOp,
+          callGasLimit: BigInt(gasLimits.callGasLimit),
+          verificationGasLimit: BigInt(gasLimits.verificationGasLimit),
+          paymasterVerificationGasLimit: BigInt(
+            gasLimits.paymasterVerificationGasLimit,
+          ),
+          paymasterPostOpGasLimit: BigInt(gasLimits.paymasterPostOpGasLimit),
+          maxFeePerGas: BigInt(1),
+          maxPriorityFeePerGas: BigInt(1),
+        },
         AddressZero,
         "0x",
       );
@@ -243,6 +261,33 @@ export class Eth {
                 l1DiffSizeCall: this.buildL1DiffSizeCall(
                   entryPoint,
                   userOp,
+                  {
+                    callGasLimit: this.markupEstimate(
+                      callGasLimit,
+                      BigInt(this.config.cglMarkupPercent),
+                      BigInt(this.config.cglMarkup),
+                    ),
+                    verificationGasLimit: this.markupEstimate(
+                      verificationGasLimit,
+                      BigInt(this.config.vglMarkupPercent),
+                      BigInt(this.config.vglMarkup),
+                    ),
+                    paymasterVerificationGasLimit: userOp.paymaster
+                      ? this.markupEstimate(
+                          estimates.executionResult
+                            .paymasterVerificationGasLimit,
+                          BigInt(this.config.paymasterVglMarkupPercent),
+                          BigInt(this.config.paymasterVglMarkup),
+                        )
+                      : BigInt(0),
+                    paymasterPostOpGasLimit: userOp.paymaster
+                      ? this.markupEstimate(
+                          estimates.executionResult.paymasterPostOpGasLimit,
+                          BigInt(this.config.paymasterPoglMarkupPercent),
+                          BigInt(this.config.paymasterPoglMarkup),
+                        )
+                      : BigInt(0),
+                  },
                   stateOverrides,
                 ),
               }
@@ -640,6 +685,14 @@ export class Eth {
                 l1DiffSizeCall: this.buildL1DiffSizeCall(
                   entryPoint,
                   userOp,
+                  {
+                    callGasLimit,
+                    verificationGasLimit,
+                    paymasterVerificationGasLimit:
+                      partialUserOp.paymasterVerificationGasLimit ?? BigInt(0),
+                    paymasterPostOpGasLimit:
+                      partialUserOp.paymasterPostOpGasLimit ?? BigInt(0),
+                  },
                   stateOverrides,
                 ),
               }
