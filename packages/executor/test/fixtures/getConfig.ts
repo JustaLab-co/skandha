@@ -40,6 +40,7 @@ const BaseConfig: ConfigOptions = {
     canonicalMempoolId: "",
     canonicalEntryPoint: "",
     pvgMarkupPercent: 0,
+    citreaDiffSizeMargin: 80,
     cglMarkupPercent: 0,
     vglMarkupPercent: 3000,
     fastlaneValidators: [],

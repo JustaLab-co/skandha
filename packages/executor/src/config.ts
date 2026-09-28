@@ -425,6 +425,13 @@ export class Config {
         config.pvgMarkupPercent || bundlerDefaultConfigs.pvgMarkupPercent
       )
     );
+    config.citreaDiffSizeMargin = Number(
+      fromEnvVar(
+        "CITREA_DIFF_SIZE_MARGIN",
+        config.citreaDiffSizeMargin ??
+          bundlerDefaultConfigs.citreaDiffSizeMargin
+      )
+    );
     config.cglMarkupPercent = Number(
       fromEnvVar(
         "CGL_MARKUP_PERCENT",
@@ -649,6 +656,7 @@ const bundlerDefaultConfigs: BundlerConfig = {
   archiveDuration: 24 * 3600,
   estimationGasLimit: 0,
   pvgMarkupPercent: 0,
+  citreaDiffSizeMargin: 80,
   cglMarkupPercent: 0,
   vglMarkupPercent: 0,
   paymasterVglMarkupPercent: 0,

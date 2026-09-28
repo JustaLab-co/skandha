@@ -11,6 +11,7 @@ import {
   estimateArbitrumPVG,
   ECDSA_DUMMY_SIGNATURE,
   estimateMantlePVG,
+  estimateCitreaPVG,
   AddressZero,
 } from "@skandha/params/lib/index.js";
 import { Logger } from "@skandha/types/lib/index.js";
@@ -30,6 +31,7 @@ import {
   GetNodeAPI,
   NetworkConfig,
   SimulateHandleOpResultAndGasLimits,
+  StateOverrides,
 } from "../interfaces.js";
 import { EntryPointVersion } from "../services/EntryPointService/interfaces.js";
 import { getUserOpGasLimit } from "../services/BundlingService/utils/index.js";
@@ -42,6 +44,9 @@ import {
 import { Skandha } from "./skandha.js";
 
 type BigNumberish = bigint | number | `0x${string}` | `${number}` | string;
+
+// citrea, citrea testnet
+const CITREA_CHAIN_IDS = [4114, 5115];
 
 export class Eth {
   private pvgEstimator: IPVGEstimator | null = null;
@@ -78,6 +83,13 @@ export class Eth {
       this.pvgEstimator = estimateMantlePVG(this.publicClient);
     }
 
+    if (CITREA_CHAIN_IDS.includes(this.chainId)) {
+      this.pvgEstimator = estimateCitreaPVG(
+        this.publicClient,
+        this.config.citreaDiffSizeMargin,
+      );
+    }
+
     if (this.config.blockscoutUrl) {
       this.blockscoutApi = new BlockscoutAPI(
         this.publicClient,
@@ -86,6 +98,45 @@ export class Eth {
         this.config.blockscoutApiKeys,
       );
     }
+  }
+
+  /**
+   * simulateHandleOp call used to size the userop's state diff (Citrea L1 fee).
+   * Mirrors the estimation simulation (gas price of 1, so prefund never fails).
+   */
+  private buildL1DiffSizeCall(
+    entryPoint: string,
+    userOp: UserOperation,
+    stateOverrides?: StateOverrides,
+  ): {
+    to: string;
+    data: string;
+    stateOverride: Record<string, unknown>;
+    ignoredStorage: Record<string, string[]>;
+  } {
+    const [data, entryPointOverride] =
+      this.entryPointService.encodeSimulateHandleOp(
+        entryPoint,
+        { ...userOp, maxFeePerGas: BigInt(1), maxPriorityFeePerGas: BigInt(1) },
+        AddressZero,
+        "0x",
+      );
+    const stateOverride: Record<string, unknown> = {
+      ...stateOverrides,
+      ...entryPointOverride,
+    };
+    if (userOp.eip7702Auth) {
+      stateOverride[userOp.sender] = {
+        code: "0xef0100" + userOp.eip7702Auth.address.substring(2),
+      };
+    }
+    return {
+      to: entryPoint,
+      data,
+      stateOverride,
+      // EntryPointSimulations re-initializes these on every call, handleOps never writes them
+      ignoredStorage: { [entryPoint.toLowerCase()]: ["0x4", "0x5"] },
+    };
   }
 
   private calcVerificationGasAndCallGasLimit(
@@ -142,6 +193,7 @@ export class Eth {
     entryPoint: string,
     estimates: SimulateHandleOpResultAndGasLimits,
     userOp: UserOperation,
+    stateOverrides?: StateOverrides,
   ): Promise<{
     callGasLimit: bigint;
     verificationGas: bigint;
@@ -186,6 +238,15 @@ export class Eth {
             userOp.factory && userOp.factory.length > 2,
           ),
           userOp,
+          ...(CITREA_CHAIN_IDS.includes(this.chainId)
+            ? {
+                l1DiffSizeCall: this.buildL1DiffSizeCall(
+                  entryPoint,
+                  userOp,
+                  stateOverrides,
+                ),
+              }
+            : {}),
         },
       );
     }
@@ -440,6 +501,7 @@ export class Eth {
         entryPoint,
         validateForEstimationResponse as SimulateHandleOpResultAndGasLimits,
         userOp,
+        stateOverrides,
       );
     }
 
@@ -573,6 +635,15 @@ export class Eth {
             userOp.factory && userOp.factory.length > 2,
           ),
           userOp,
+          ...(CITREA_CHAIN_IDS.includes(this.chainId)
+            ? {
+                l1DiffSizeCall: this.buildL1DiffSizeCall(
+                  entryPoint,
+                  userOp,
+                  stateOverrides,
+                ),
+              }
+            : {}),
         },
       );
     }

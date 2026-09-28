@@ -19,5 +19,13 @@ export type IPVGEstimator = (
   options?: {
     contractCreation?: boolean;
     userOp?: UserOperation;
+    // non-reverting call that performs the userop's state writes (used for state-diff based L1 fees, e.g. Citrea)
+    l1DiffSizeCall?: {
+      to: string;
+      data: string;
+      stateOverride?: Record<string, unknown>;
+      // slots the call writes that the real handleOps doesn't
+      ignoredStorage?: Record<string, string[]>;
+    };
   }
 ) => Promise<bigint>;

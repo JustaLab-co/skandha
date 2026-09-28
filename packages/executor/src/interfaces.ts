@@ -186,6 +186,9 @@ export interface NetworkConfig {
   vglMarkupPercent: number;
   paymasterVglMarkupPercent: number;
   paymasterPoglMarkupPercent: number;
+  // Citrea: bytes added to the traced state diff when pricing the L1 fee into PVG
+  // (covers slots written and restored within the tx), default = 80
+  citreaDiffSizeMargin: number;
   // enables / disabled eip1559
   eip1559: boolean;
   blockscoutUrl: string;
