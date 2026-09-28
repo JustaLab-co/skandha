@@ -197,15 +197,18 @@ export const estimateCitreaPVG = (
       );
     }
 
-    const trace = (diffMode: boolean): Promise<unknown> =>
+    const trace = (
+      tracer: string,
+      tracerConfig: Record<string, boolean>
+    ): Promise<unknown> =>
       publicClient.request({
         method: "debug_traceCall",
         params: [
           { to: diffCall.to, data: diffCall.data },
           "latest",
           {
-            tracer: "prestateTracer",
-            tracerConfig: { diffMode },
+            tracer,
+            tracerConfig,
             ...(diffCall.stateOverride
               ? { stateOverrides: diffCall.stateOverride }
               : {}),
@@ -213,7 +216,7 @@ export const estimateCitreaPVG = (
         ],
       } as any);
 
-    const [latestBlock, diff, prestate] = await Promise.all([
+    const [latestBlock, diff, prestate, topCall] = await Promise.all([
       publicClient.request({
         method: "eth_getBlockByNumber",
         params: ["latest", false],
@@ -222,9 +225,21 @@ export const estimateCitreaPVG = (
         l1FeeRate?: string;
         miner?: string;
       }>,
-      trace(true) as Promise<PrestateDiff>,
-      trace(false) as Promise<Prestate>,
+      trace("prestateTracer", { diffMode: true }) as Promise<PrestateDiff>,
+      trace("prestateTracer", { diffMode: false }) as Promise<Prestate>,
+      // prestate traces of a reverted call are empty instead of failing
+      trace("callTracer", { onlyTopCall: true }) as Promise<{
+        error?: string;
+        revertReason?: string;
+      }>,
     ]);
+    if (topCall.error) {
+      throw new Error(
+        `Citrea L1 diff size simulation reverted: ${
+          topCall.revertReason ?? topCall.error
+        }`
+      );
+    }
 
     if (latestBlock.baseFeePerGas == null || latestBlock.l1FeeRate == null) {
       throw new Error("Citrea block is missing baseFeePerGas or l1FeeRate");

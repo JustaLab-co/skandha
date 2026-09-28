@@ -8,8 +8,8 @@ describe("Citrea PVG estimation isolation", () => {
     sender: "0x1111111111111111111111111111111111111111",
     nonce: BigInt(0),
     callData: "0x",
-    callGasLimit: BigInt(1),
-    verificationGasLimit: BigInt(1),
+    callGasLimit: BigInt(10e6),
+    verificationGasLimit: BigInt(10e6),
     preVerificationGas: BigInt(0),
     maxFeePerGas: BigInt(1),
     maxPriorityFeePerGas: BigInt(1),
@@ -40,16 +40,19 @@ describe("Citrea PVG estimation isolation", () => {
     citreaDiffSizeMargin: 80,
   };
 
+  let simulatedOp: any = null;
   const run = async (
     chainId: number
   ): Promise<{ options: string | null; simulationEncodes: number }> => {
     let simulationEncodes = 0;
+    simulatedOp = null;
     let options: string | null = null;
     const entryPointService = {
       calcPreverificationGas: () => 50000,
       encodeHandleOps: () => "0xdead",
-      encodeSimulateHandleOp: () => {
+      encodeSimulateHandleOp: (_ep: string, op: any) => {
         simulationEncodes++;
+        simulatedOp = op;
         return ["0xbeef", {}];
       },
     };
@@ -110,5 +113,16 @@ describe("Citrea PVG estimation isolation", () => {
         simulationEncodes: 1,
       });
     }
+  });
+
+  it("simulates with the estimated gas limits, not the 10M placeholders", async () => {
+    // 10M call gas doesn't fit in Citrea's 10M block gas limit (AA95)
+    await run(4114);
+    expect(simulatedOp.callGasLimit).toEqual(estimates.callGasLimit);
+    expect(simulatedOp.verificationGasLimit).toEqual(
+      estimates.verificationGasLimit
+    );
+    expect(simulatedOp.paymasterPostOpGasLimit).toEqual(BigInt(0));
+    expect(simulatedOp.maxFeePerGas).toEqual(BigInt(1));
   });
 });

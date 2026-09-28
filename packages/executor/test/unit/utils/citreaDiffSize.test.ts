@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   calcCitreaDiffSize,
+  estimateCitreaPVG,
   CITREA_DIFF_SIZE_MARGIN,
 } from "@skandha/params/lib/gas-estimation/citrea.js";
 import traces from "../../fixtures/citrea/handleOpsTraces.json";
@@ -86,5 +87,56 @@ describe("calcCitreaDiffSize", () => {
     expect(calcCitreaDiffSize(diff, prestate).lower).toBeGreaterThan(
       calcCitreaDiffSize({ pre: {}, post: {} }, {}).lower
     );
+  });
+
+  describe("estimateCitreaPVG", () => {
+    const trace = (traces as any[])[0];
+    const client = (reverted: boolean) =>
+      ({
+        request: async ({ method, params }: any) => {
+          if (method === "eth_getBlockByNumber")
+            return {
+              baseFeePerGas: "0xf4240",
+              l1FeeRate: "0x119be6378",
+              miner: "0x3100000000000000000000000000000000000005",
+            };
+          const { tracer, tracerConfig } = params[2];
+          if (tracer === "callTracer")
+            return reverted ? { error: "execution reverted" } : {};
+          return tracerConfig.diffMode ? trace.diff : trace.prestate;
+        },
+      } as any);
+    const options = {
+      userOp: {
+        sender: trace.from,
+        maxFeePerGas: BigInt(2000000),
+        maxPriorityFeePerGas: BigInt(100),
+      } as any,
+      l1DiffSizeCall: { to: "0x", data: "0x" },
+    };
+
+    it("throws when the traced simulation reverts", async () => {
+      // prestate traces of a reverted call are empty, which would price the L1 fee at ~0
+      await expect(
+        estimateCitreaPVG(client(true))("0x", "0x", 0, options)
+      ).rejects.toThrow("simulation reverted");
+    });
+
+    it("adds l1FeeRate * diff size, in gas at the userop gas price", async () => {
+      const pvg = await estimateCitreaPVG(client(false), 0)(
+        "0x",
+        "0x",
+        1000,
+        options
+      );
+      const { lower } = calcCitreaDiffSize(trace.diff, trace.prestate, {
+        traceFrom: "0x0000000000000000000000000000000000000000",
+      });
+      const l2Price = BigInt(1000000 + 100);
+      const l1Fee = BigInt(0x119be6378) * BigInt(lower);
+      expect(pvg).toEqual(
+        (l1Fee + l2Price - BigInt(1)) / l2Price + BigInt(1000)
+      );
+    });
   });
 });
