@@ -5,7 +5,7 @@ import { logger } from "../../mocks";
 
 const ENTRY_POINT = "0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108";
 
-type GetLogsArgs = { fromBlock: bigint; toBlock: bigint };
+type GetLogsArgs = { fromBlock: bigint; toBlock?: bigint };
 
 function createService(head: () => bigint, range = 100) {
   const fakeClient = {
@@ -29,14 +29,65 @@ function createService(head: () => bigint, range = 100) {
     range
   );
   const poll = (): Promise<void> => service.pollEvents(client);
-  const lastRange = (): [bigint, bigint] => {
+  const lastRange = (): [bigint, bigint | undefined] => {
     const args = fakeClient.getLogs.mock.calls.at(-1)![0];
     return [args.fromBlock, args.toBlock];
   };
   return { fakeClient, poll, lastRange };
 }
 
-describe("EntryPointV8EventsService polling", () => {
+describe("EntryPointV8EventsService polling (eventsPollingRange unset)", () => {
+  it("keeps the original open-ended query and cursor logic", async () => {
+    let head = 1000n;
+    const { fakeClient, poll, lastRange } = createService(() => head, 0);
+    await poll();
+    expect(lastRange()).toEqual([999n, undefined]);
+    expect(fakeClient.getLogs.mock.calls.at(-1)![0]).not.toHaveProperty(
+      "toBlock"
+    );
+
+    // no events: cursor jumps to the head fetched before getLogs
+    head = 300000n;
+    await poll();
+    expect(lastRange()).toEqual([1001n, undefined]);
+    await poll();
+    expect(lastRange()).toEqual([300001n, undefined]);
+
+    // events returned: cursor moves to the last event's block
+    head = 300100n;
+    fakeClient.getLogs.mockResolvedValueOnce([
+      { eventName: "SignatureAggregatorChanged", blockNumber: 300050n, args: {} },
+    ]);
+    await poll();
+    await poll();
+    expect(lastRange()).toEqual([300051n, undefined]);
+
+    // failure: cursor not advanced, same fromBlock is retried
+    fakeClient.getLogs.mockRejectedValueOnce(new Error("upstream error"));
+    await poll();
+    expect(lastRange()).toEqual([300101n, undefined]);
+    await poll();
+    expect(lastRange()).toEqual([300101n, undefined]);
+  });
+
+  it("does not guard against overlapping polls", async () => {
+    const { fakeClient, poll } = createService(() => 1000n, 0);
+    let release: (logs: unknown[]) => void = () => {};
+    fakeClient.getLogs.mockImplementationOnce(
+      () => new Promise((resolve) => (release = resolve))
+    );
+    const first = poll();
+    while (fakeClient.getLogs.mock.calls.length === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    await poll();
+    release([]);
+    await first;
+    expect(fakeClient.getLogs).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("EntryPointV8EventsService polling (eventsPollingRange set)", () => {
   it("starts from head - 1 and always passes an explicit toBlock", async () => {
     const { poll, lastRange } = createService(() => 1000n);
     await poll();

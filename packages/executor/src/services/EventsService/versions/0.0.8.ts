@@ -131,6 +131,68 @@ export class EntryPointV8EventsService {
   }
 
   async pollEvents(publicClient: PublicClient): Promise<void> {
+    if (this.eventsPollingRange > 0) {
+      return this.pollEventsInRange(publicClient);
+    }
+    try {
+      let blockNumber: bigint;
+      const currentBlockNumber = await this.publicClient
+        .getBlockNumber()
+        .catch((err) => {
+          this.logger.error(
+            `Error fetching block number while polling for user operation events: ${JSON.stringify(
+              err
+            )}`
+          );
+          return err;
+        });
+      if (currentBlockNumber instanceof Error) {
+        return;
+      }
+      if (this.lastBlock === BigInt(0)) {
+        blockNumber = currentBlockNumber - BigInt(1);
+      } else {
+        blockNumber = this.lastBlock + BigInt(1);
+      }
+      const logs = await publicClient
+        .getLogs({
+          events: this.eventsAbi,
+          address: this.entryPoint,
+          fromBlock: blockNumber,
+        })
+        .catch((err) => {
+          this.logger.error(
+            `Error fetching logs while polling for user operation events: ${JSON.stringify(
+              err
+            )}`
+          );
+          return err;
+        });
+
+      if (logs instanceof Error) {
+        return;
+      }
+
+      if (logs.length === 0) {
+        this.lastBlock = currentBlockNumber;
+      }
+
+      for (const log of logs) {
+        void this.handleEvent(log);
+        this.lastBlock = log.blockNumber;
+      }
+    } catch (error) {
+      this.logger.error(
+        "Error fetching block number during, polling for user operation events"
+      );
+    }
+  }
+
+  // used when eventsPollingRange > 0: each eth_getLogs covers a bounded
+  // [fromBlock, toBlock] range and the cursor advances after every
+  // successful request, so it catches up to head and never builds up a range
+  // that the rpc rejects
+  private async pollEventsInRange(publicClient: PublicClient): Promise<void> {
     // skip if the previous poll is still in flight, so polls don't overlap
     // and race on lastBlock
     if (this.isPolling) {
