@@ -104,6 +104,7 @@ type SignatureAggregatorChangedEventAbi = {
 
 export class EntryPointV8EventsService {
   private lastBlock: bigint = BigInt(0);
+  private isPolling = false;
   private LAST_BLOCK_KEY: string;
   private eventsAbi;
 
@@ -118,7 +119,8 @@ export class EntryPointV8EventsService {
     private db: IDbController,
     private logger: Logger,
     private pollingInterval: number,
-    private disableWatchContractevent: boolean
+    private disableWatchContractevent: boolean,
+    private eventsPollingRange: number
   ) {
     this.LAST_BLOCK_KEY = `${this.chainId}:LAST_PARSED_BLOCK:${this.entryPoint}`;
     this.eventsAbi = parseAbi([
@@ -129,6 +131,9 @@ export class EntryPointV8EventsService {
   }
 
   async pollEvents(publicClient: PublicClient): Promise<void> {
+    if (this.eventsPollingRange > 0) {
+      return this.pollEventsInRange(publicClient);
+    }
     try {
       let blockNumber: bigint;
       const currentBlockNumber = await this.publicClient
@@ -180,6 +185,81 @@ export class EntryPointV8EventsService {
       this.logger.error(
         "Error fetching block number during, polling for user operation events"
       );
+    }
+  }
+
+  // used when eventsPollingRange > 0: each eth_getLogs covers a bounded
+  // [fromBlock, toBlock] range and the cursor advances after every
+  // successful request, so it catches up to head and never builds up a range
+  // that the rpc rejects
+  private async pollEventsInRange(publicClient: PublicClient): Promise<void> {
+    // skip if the previous poll is still in flight, so polls don't overlap
+    // and race on lastBlock
+    if (this.isPolling) {
+      return;
+    }
+    this.isPolling = true;
+    try {
+      const currentBlockNumber = await this.publicClient
+        .getBlockNumber()
+        .catch((err) => {
+          this.logger.error(
+            `Error fetching block number while polling for user operation events: ${JSON.stringify(
+              err
+            )}`
+          );
+          return err;
+        });
+      if (currentBlockNumber instanceof Error) {
+        return;
+      }
+      const fromBlock =
+        this.lastBlock === BigInt(0)
+          ? currentBlockNumber - BigInt(1)
+          : this.lastBlock + BigInt(1);
+      // the rpc reported a head behind our cursor (lagging node or reorg),
+      // nothing new to query yet
+      if (fromBlock > currentBlockNumber) {
+        return;
+      }
+      // always query a bounded range, rpc providers reject large ranges
+      const maxRange = BigInt(Math.max(1, Math.floor(this.eventsPollingRange)));
+      let toBlock = fromBlock + maxRange - BigInt(1);
+      if (toBlock > currentBlockNumber) {
+        toBlock = currentBlockNumber;
+      }
+      const logs = await publicClient
+        .getLogs({
+          events: this.eventsAbi,
+          address: this.entryPoint,
+          fromBlock,
+          toBlock,
+        })
+        .catch((err) => {
+          this.logger.error(
+            `Error fetching logs while polling for user operation events: ${JSON.stringify(
+              err
+            )}`
+          );
+          return err;
+        });
+
+      if (logs instanceof Error) {
+        return;
+      }
+
+      for (const log of logs) {
+        void this.handleEvent(log);
+      }
+      // the whole [fromBlock, toBlock] range has been processed,
+      // advance even if it contained no events so the cursor catches up to head
+      this.lastBlock = toBlock;
+    } catch (error) {
+      this.logger.error(
+        "Error fetching block number during, polling for user operation events"
+      );
+    } finally {
+      this.isPolling = false;
     }
   }
 

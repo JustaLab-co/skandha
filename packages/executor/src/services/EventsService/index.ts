@@ -39,7 +39,8 @@ export class EventsService {
         this.db,
         this.logger,
         this.networkConfig.pollingInterval,
-        this.networkConfig.disableWatchContract
+        this.networkConfig.disableWatchContract,
+        this.networkConfig.eventsPollingRange
       );
       this.eventsService[address].initEventListener();
     }
