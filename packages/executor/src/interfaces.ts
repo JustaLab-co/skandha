@@ -200,6 +200,10 @@ export interface NetworkConfig {
   eip7702: boolean;
   pollingInterval: number;
   disableWatchContract: boolean;
+  // max block range of each eth_getLogs request made by the user op events poller
+  // rpc providers reject large ranges (e.g. drpc rejects > 100k blocks)
+  // default = 10000
+  eventsPollingRange: number;
   // simulation contracts
   epSimulationsContract: string;
   pimlicoSimulationsContract: string;

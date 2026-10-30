@@ -104,6 +104,7 @@ type SignatureAggregatorChangedEventAbi = {
 
 export class EntryPointV8EventsService {
   private lastBlock: bigint = BigInt(0);
+  private isPolling = false;
   private LAST_BLOCK_KEY: string;
   private eventsAbi;
 
@@ -118,7 +119,8 @@ export class EntryPointV8EventsService {
     private db: IDbController,
     private logger: Logger,
     private pollingInterval: number,
-    private disableWatchContractevent: boolean
+    private disableWatchContractevent: boolean,
+    private eventsPollingRange: number
   ) {
     this.LAST_BLOCK_KEY = `${this.chainId}:LAST_PARSED_BLOCK:${this.entryPoint}`;
     this.eventsAbi = parseAbi([
@@ -129,8 +131,13 @@ export class EntryPointV8EventsService {
   }
 
   async pollEvents(publicClient: PublicClient): Promise<void> {
+    // skip if the previous poll is still in flight, so polls don't overlap
+    // and race on lastBlock
+    if (this.isPolling) {
+      return;
+    }
+    this.isPolling = true;
     try {
-      let blockNumber: bigint;
       const currentBlockNumber = await this.publicClient
         .getBlockNumber()
         .catch((err) => {
@@ -144,16 +151,27 @@ export class EntryPointV8EventsService {
       if (currentBlockNumber instanceof Error) {
         return;
       }
-      if (this.lastBlock === BigInt(0)) {
-        blockNumber = currentBlockNumber - BigInt(1);
-      } else {
-        blockNumber = this.lastBlock + BigInt(1);
+      const fromBlock =
+        this.lastBlock === BigInt(0)
+          ? currentBlockNumber - BigInt(1)
+          : this.lastBlock + BigInt(1);
+      // the rpc reported a head behind our cursor (lagging node or reorg),
+      // nothing new to query yet
+      if (fromBlock > currentBlockNumber) {
+        return;
+      }
+      // always query a bounded range, rpc providers reject large ranges
+      const maxRange = BigInt(Math.max(1, Math.floor(this.eventsPollingRange)));
+      let toBlock = fromBlock + maxRange - BigInt(1);
+      if (toBlock > currentBlockNumber) {
+        toBlock = currentBlockNumber;
       }
       const logs = await publicClient
         .getLogs({
           events: this.eventsAbi,
           address: this.entryPoint,
-          fromBlock: blockNumber,
+          fromBlock,
+          toBlock,
         })
         .catch((err) => {
           this.logger.error(
@@ -168,18 +186,18 @@ export class EntryPointV8EventsService {
         return;
       }
 
-      if (logs.length === 0) {
-        this.lastBlock = currentBlockNumber;
-      }
-
       for (const log of logs) {
         void this.handleEvent(log);
-        this.lastBlock = log.blockNumber;
       }
+      // the whole [fromBlock, toBlock] range has been processed,
+      // advance even if it contained no events so the cursor catches up to head
+      this.lastBlock = toBlock;
     } catch (error) {
       this.logger.error(
         "Error fetching block number during, polling for user operation events"
       );
+    } finally {
+      this.isPolling = false;
     }
   }
 

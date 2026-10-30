@@ -532,6 +532,13 @@ export class Config {
       )
     );
 
+    config.eventsPollingRange = Number(
+      fromEnvVar(
+        "EVENTS_POLLING_RANGE",
+        config.eventsPollingRange || bundlerDefaultConfigs.eventsPollingRange
+      )
+    );
+
     config.binarySearchMaxRetries = Number(
       fromEnvVar(
         "BINARY_SEARCH_MAX_RETRIES",
@@ -671,6 +678,7 @@ const bundlerDefaultConfigs: BundlerConfig = {
   eip7702: false,
   pollingInterval: 4000,
   disableWatchContract: false,
+  eventsPollingRange: 10000,
   epSimulationsContract: "",
   pimlicoSimulationsContract: "",
   binarySearchMaxRetries: 3,
