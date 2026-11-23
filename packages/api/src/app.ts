@@ -5,6 +5,11 @@ import RpcError from "@skandha/types/lib/api/errors/rpc-error.js";
 import * as RpcErrorCodes from "@skandha/types/lib/api/errors/rpc-error-codes.js";
 import { deepHexlify } from "@skandha/utils/lib/hexlify.js";
 import {
+  getTraceContext,
+  newTraceId,
+  traceStorage,
+} from "@skandha/utils/lib/traceContext.js";
+import {
   BundlerRPCMethods,
   CustomRPCMethods,
   HttpStatus,
@@ -20,6 +25,14 @@ import {
 import { SkandhaAPI } from "./modules/skandha.js";
 import { JsonRpcRequest, JsonRpcResponse } from "./interface.js";
 import { Server } from "./server.js";
+import logger from "./logger.js";
+
+/** Methods whose first param is the userOpHash being looked up */
+const USEROP_HASH_PARAM_METHODS: string[] = [
+  BundlerRPCMethods.eth_getUserOperationReceipt,
+  BundlerRPCMethods.eth_getUserOperationByHash,
+  CustomRPCMethods.skandha_userOperationStatus,
+];
 
 export interface RpcHandlerOptions {
   config: Config;
@@ -187,7 +200,68 @@ export class ApiApp {
     return true; // the request can not be handled by this function
   }
 
+  /**
+   * Handles one JSON-RPC call in its own trace context (sharing the HTTP
+   * request's traceId, so batch items don't leak userOpHashes into each
+   * other) and writes one summary log line for it.
+   */
   private async handleRpcRequest(
+    request: JsonRpcRequest,
+    ip: string,
+    authKey?: string
+  ): Promise<JsonRpcResponse> {
+    const traceContext = {
+      traceId: getTraceContext()?.traceId ?? newTraceId(),
+      userOpHash: undefined as string | undefined,
+    };
+    const method = request?.method;
+    const firstParam = Array.isArray(request?.params)
+      ? request.params[0]
+      : undefined;
+    if (
+      USEROP_HASH_PARAM_METHODS.includes(method) &&
+      typeof firstParam === "string"
+    ) {
+      traceContext.userOpHash = firstParam;
+    }
+
+    return traceStorage.run(traceContext, async () => {
+      const startedAt = Date.now();
+      let response: JsonRpcResponse | undefined;
+      let error: unknown;
+      try {
+        response = await this.dispatchRpcRequest(request, ip, authKey);
+        if (
+          method === BundlerRPCMethods.eth_sendUserOperation &&
+          typeof response?.result === "string"
+        ) {
+          traceContext.userOpHash = response.result;
+        }
+        return response;
+      } catch (err) {
+        error = err;
+        throw err;
+      } finally {
+        const summary = {
+          method,
+          chainId: this.config.chainId,
+          durationMs: Date.now() - startedAt,
+          ...(error instanceof RpcError
+            ? { errorCode: error.code, error: error.message }
+            : error instanceof Error
+            ? { error: error.message }
+            : {}),
+        };
+        if (error) {
+          logger.warn(summary, "RPC ::");
+        } else {
+          logger.info(summary, "RPC ::");
+        }
+      }
+    });
+  }
+
+  private async dispatchRpcRequest(
     request: JsonRpcRequest,
     ip: string,
     authKey?: string

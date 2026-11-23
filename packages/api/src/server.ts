@@ -1,3 +1,4 @@
+import { AsyncResource } from "node:async_hooks";
 import fastify, {
   FastifyError,
   FastifyInstance,
@@ -8,6 +9,12 @@ import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import RpcError from "@skandha/types/lib/api/errors/rpc-error.js";
 import { ServerConfig } from "@skandha/types/lib/api/interfaces";
+import {
+  TraceContext,
+  newTraceId,
+  traceIdFromHeaders,
+  traceStorage,
+} from "@skandha/utils/lib/traceContext.js";
 import logger from "./logger.js";
 import { HttpStatus } from "./constants.js";
 import { JsonRpcRequest } from "./interface.js";
@@ -43,6 +50,9 @@ export class Server {
         });
       }
     }
+
+    addTraceHooks(app);
+    if (ws && ws !== app) addTraceHooks(ws);
 
     app.addHook("preHandler", (req, reply, done) => {
       
@@ -142,6 +152,44 @@ export class Server {
       );
     }
   }
+}
+
+declare module "fastify" {
+  interface FastifyRequest {
+    traceContext: TraceContext | null;
+    traceResource: AsyncResource | null;
+  }
+}
+
+/**
+ * Runs every request inside an AsyncLocalStorage holding its traceId, taken
+ * from the caller's traceparent / b3 header (or generated when absent), so the
+ * logger mixin can put it on every line. Same pattern as @fastify/request-context:
+ * body parsing runs in stream callbacks that lose the context, so it is
+ * captured in onRequest and restored in preValidation.
+ */
+function addTraceHooks(app: FastifyInstanceAny): void {
+  app.decorateRequest("traceContext", null);
+  app.decorateRequest("traceResource", null);
+
+  app.addHook("onRequest", (req, _reply, done) => {
+    const traceContext: TraceContext = {
+      traceId: traceIdFromHeaders(req.headers) ?? newTraceId(),
+    };
+    req.traceContext = traceContext;
+    traceStorage.run(traceContext, () => {
+      req.traceResource = new AsyncResource("skandha-trace");
+      done();
+    });
+  });
+
+  app.addHook("preValidation", (req, _reply, done) => {
+    if (req.traceResource) {
+      req.traceResource.runInAsyncScope(done, req.raw);
+    } else {
+      done();
+    }
+  });
 }
 
 /// @note to address the bug in fastify types, will be removed in future
