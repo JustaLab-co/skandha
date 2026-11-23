@@ -14,8 +14,4 @@ FROM oven/bun:1.2.23-alpine
 WORKDIR /usr/app
 COPY --from=build_src /usr/app .
 
-# JSON logs (one object per line, with traceId) so Loki can parse the fields.
-# Override with LOG_FORMAT=pretty for human-readable output.
-ENV LOG_FORMAT=json
-
 ENTRYPOINT ["bun", "--bun", "./packages/cli/bin/skandha"]

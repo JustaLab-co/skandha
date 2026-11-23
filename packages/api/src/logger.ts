@@ -3,13 +3,11 @@ import * as dotenv from 'dotenv';
 import { getTraceContext } from "@skandha/utils/lib/traceContext.js";
 dotenv.config();
 
-// LOG_FORMAT=json writes one JSON object per line (for Loki); LOG_FORMAT=pretty
-// writes colorized text for local development. Defaults to json when
-// NODE_ENV=production, pretty otherwise.
-const logFormat =
-  process.env.LOG_FORMAT ??
-  (process.env.NODE_ENV === "production" ? "json" : "pretty");
-const pretty = logFormat !== "json";
+// LOG_FORMAT=json writes one JSON object per line (for Loki); anything else
+// keeps the colorized pino-pretty output. JSON is opt-in per deployment:
+// the Grafana bundler alerts match the pretty format, so switch them to
+// match JSON too before setting LOG_FORMAT=json.
+const pretty = process.env.LOG_FORMAT !== "json";
 
 // Severities fatal - 60, error - 50, warn - 40, info - 30, debug - 20, trace - 10
 // if LOG_LEVEL is set to "info" severity, then debug and trace logs will be suppressed
