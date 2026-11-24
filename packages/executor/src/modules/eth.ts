@@ -20,6 +20,7 @@ import { UserOperation } from "@skandha/types/lib/contracts/UserOperation";
 import { UserOperationStruct } from "@skandha/types/lib/contracts/EPv6/EntryPoint.js";
 import { MempoolEntryStatus } from "@skandha/types/lib/executor";
 import { BlockscoutAPI } from "@skandha/utils/lib/third-party";
+import { setTraceUserOpHash } from "@skandha/utils/lib/traceContext.js";
 import { PublicClient, Hex, GetTransactionReturnType } from "viem";
 import {
   UserOpValidationService,
@@ -407,6 +408,8 @@ export class Eth {
       entryPoint,
       userOp,
     );
+    // later validation / mempool logs for this request carry the hash
+    setTraceUserOpHash(userOpHash);
 
     await this.userOpValidationService.validateGasFee(userOp);
     const validationResult =

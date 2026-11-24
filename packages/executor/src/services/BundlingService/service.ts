@@ -13,6 +13,7 @@ import {
 } from "@skandha/params/lib/index.js";
 import { IGetGasFeeResult } from "@skandha/params/lib/gas-price-oracles/oracles/index.js";
 import { Mutex } from "async-mutex";
+import { traceStorage } from "@skandha/utils/lib/traceContext.js";
 import { Hex, PublicClient } from "viem";
 import { Config } from "../../config.js";
 import {
@@ -359,9 +360,14 @@ export class BundlingService {
     if (this.bundlingMode !== "auto") {
       return;
     }
-    this.autoBundlingCron = setInterval(() => {
-      void this.tryBundle();
-    }, this.autoBundlingInterval);
+    // Create the timer outside any request's trace context: a timer keeps the
+    // context it was created in, so when a debug_bundler_* call restarts the
+    // cron, every later bundling log would otherwise carry that call's traceId.
+    this.autoBundlingCron = traceStorage.exit(() =>
+      setInterval(() => {
+        void this.tryBundle();
+      }, this.autoBundlingInterval)
+    );
   }
 
   async sendNextBundle(): Promise<void> {

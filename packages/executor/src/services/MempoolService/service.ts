@@ -118,6 +118,15 @@ export class MempoolService {
     for (const entry of entries) {
       entry.setStatus(status, params);
       await this.update(entry);
+      this.logger.info(
+        {
+          userOpHash: entry.userOpHash,
+          status: MempoolEntryStatus[status],
+          transaction: params?.transaction,
+          revertReason: params?.revertReason,
+        },
+        "USEROP STATUS ::"
+      );
 
       // event bus logic
       if (
@@ -184,7 +193,10 @@ export class MempoolService {
         });
         await this.removeUserOpHash(existingEntry.userOpHash);
         await this.saveUserOpHash(entry.userOpHash, entry);
-        this.logger.debug("Mempool: User op replaced");
+        this.logger.debug(
+          { userOpHash: entry.userOpHash },
+          "Mempool: User op replaced"
+        );
       } else {
         await this.reputationCheck.checkEntityCountInMempool(
           entry,
@@ -200,7 +212,10 @@ export class MempoolService {
         await this.db.put(this.USEROP_COLLECTION_KEY, userOpKeys);
         await this.db.put(key, { ...entry, lastUpdatedTime: now() });
         await this.saveUserOpHash(entry.userOpHash, entry);
-        this.logger.debug("Mempool: User op added");
+        this.logger.debug(
+          { userOpHash: entry.userOpHash },
+          "Mempool: User op added"
+        );
       }
       await this.reputationCheck.updateSeenStatus(
         entryPoint,
@@ -323,7 +338,10 @@ export class MempoolService {
       const newKeys = (await this.fetchKeys()).filter((k) => k !== key);
       await this.db.del(key);
       await this.db.put(this.USEROP_COLLECTION_KEY, newKeys);
-      this.logger.debug(`${entry.userOpHash} deleted from mempool`);
+      this.logger.debug(
+        { userOpHash: entry.userOpHash },
+        "Mempool: User op deleted"
+      );
     });
   }
 
